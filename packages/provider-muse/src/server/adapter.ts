@@ -21,6 +21,7 @@ import {
   type ProviderApprovalDecision,
   type RuntimeRequestId,
   type ServerProviderModel,
+  type ServerProviderUsageLimits,
   type ThreadId,
 } from "@t3tools/contracts";
 import type { MuseSettings } from "../settings.ts";
@@ -62,6 +63,7 @@ import {
   type MuseItem,
 } from "./protocol.ts";
 import { isMuseUsageLimitFailure, museUsageLimitResetAt } from "./usageLimits.ts";
+import { museSubscriptionUsageToLimits } from "./accountUsage.ts";
 import {
   createMuseSdkHostEffect,
   MuseSdkError,
@@ -194,6 +196,7 @@ export interface MuseAdapterV2Options {
   readonly settings: MuseSettings;
   readonly environment: NodeJS.ProcessEnv;
   readonly modelCatalog?: Effect.Effect<ReadonlyArray<ServerProviderModel>>;
+  readonly onUsageLimits?: (update: ServerProviderUsageLimits) => Effect.Effect<void>;
   readonly createHost?: typeof createMuseSdkHost;
   readonly requestTimeoutMs?: number;
   readonly nativeEventLogger?: ProviderEventLoggers.EventNdjsonLogger;
@@ -1312,6 +1315,10 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
         // usage/changed is account-wide and carries no session ID.
         if (method === "usage/changed") {
           latestSubscriptionUsage = yield* decode(MuseSubscriptionUsage, params);
+          yield* (
+            options.onUsageLimits?.(museSubscriptionUsageToLimits(latestSubscriptionUsage)) ??
+              Effect.void
+          );
           return;
         }
         if (params.sessionId !== nativeSessionId) return;

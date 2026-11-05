@@ -23,6 +23,7 @@ import { makeManagedServerProvider } from "@t3tools/provider-core/server/managed
 import { enrichMuseSnapshot, latestMuseVersion, museMaintenance } from "./maintenance.ts";
 import { makeMuseEnvironment } from "./sdk.ts";
 import { museUsageReader } from "./usage.ts";
+import { readMuseUsageLimits } from "./accountUsage.ts";
 import type * as MuseUsageHome from "./MuseUsageHome.ts";
 import {
   defaultProviderContinuationIdentity,
@@ -146,6 +147,15 @@ export const MuseDriver: ProviderDriver<
       initialSnapshot: (settings) =>
         makePendingMuseProvider(settings.provider).pipe(Effect.map(stampIdentity)),
       checkProvider: checkMuseProviderStatus(effectiveConfig, processEnvironment, cwd).pipe(
+        Effect.filterOrElse(
+          (provider) => !(provider.enabled && provider.installed && provider.status === "ready"),
+          (provider) =>
+            readMuseUsageLimits({
+              binaryPath: effectiveConfig.binaryPath,
+              environment: processEnvironment,
+              cwd,
+            }).pipe(Effect.map((usageLimits) => ({ ...provider, usageLimits }))),
+        ),
         Effect.map(stampIdentity),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.provideService(FileSystem.FileSystem, fileSystem),
@@ -182,6 +192,7 @@ export const MuseDriver: ProviderDriver<
       settings: effectiveConfig,
       environment: processEnvironment,
       modelCatalog,
+      onUsageLimits: (update) => snapshot.applyUsageLimits(update),
       ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
       continuationRequests,
     });

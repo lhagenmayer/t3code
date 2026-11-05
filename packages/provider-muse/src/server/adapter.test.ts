@@ -208,7 +208,7 @@ const makeHarness = Effect.fnUntraced(function* (
   policy = runtimePolicy,
   overrides: Pick<
     MuseAdapterV2Options,
-    "createHost" | "nativeEventLogger" | "modelCatalog" | "continuationRequests"
+    "createHost" | "nativeEventLogger" | "modelCatalog" | "continuationRequests" | "onUsageLimits"
   > = {},
 ) {
   let hostCount = 0;
@@ -641,6 +641,50 @@ describe("MuseAdapterV2", () => {
       });
       const throttled = yield* harness.takeEvent("turn.terminal");
       assert.strictEqual(throttled.failure?.class, "provider_error");
+    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+  );
+
+  it.effect("publishes account-wide quota observations without a model turn", () =>
+    Effect.gen(function* () {
+      const fake = yield* makeFakeMuse();
+      const observed = yield* Deferred.make<unknown>();
+      yield* makeHarness(fake, INSTANCE_ID, undefined, undefined, undefined, runtimePolicy, {
+        onUsageLimits: (value) => Deferred.succeed(observed, value).pipe(Effect.asVoid),
+      });
+      yield* fake.emitHostWide("usage/changed", {
+        observedAtMs: Date.parse("2026-11-05T12:00:00Z"),
+        tier: "test-tier",
+        window: {
+          usedPercent: 25,
+          windowDurationMins: 300,
+          resetsAtMs: Date.parse("2026-11-05T15:00:00Z"),
+        },
+        weekly: { usedPercent: 75, resetsAtMs: Date.parse("2026-11-10T12:00:00Z") },
+      });
+      assert.deepEqual(yield* Deferred.await(observed), {
+        checkedAt: "2026-11-05T12:00:00.000Z",
+        windows: [
+          {
+            id: "session",
+            kind: "session",
+            label: "Session",
+            usedPercent: 25,
+            resetsAt: "2026-11-05T15:00:00.000Z",
+            windowDurationMins: 300,
+          },
+          {
+            id: "weekly",
+            kind: "weekly",
+            label: "Weekly",
+            usedPercent: 75,
+            resetsAt: "2026-11-10T12:00:00.000Z",
+          },
+        ],
+      });
+      assert.equal(
+        fake.calls.some((call) => call.method === "turn/start"),
+        false,
+      );
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
   );
 
